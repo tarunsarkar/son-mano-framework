@@ -319,7 +319,7 @@ class SpecificManagerRegistry(ManoBasePlugin):
                     LOG.error('Instantiation failed for: {0}, Error: {1}'.format(m_id, error))
                     result_dict.update({m_id: {'status': 'Failed', 'uuid': 'None', 'error': str(error)}})
                 else:
-                    registration = threading.Thread(target= self._wait_for_sm_registration, args=[sm_repo_name,m_id])
+                    registration = threading.Thread(target= self._wait_for_sm_registration, args=[sm_repo_name, m_id])
                     registration.daemon = True
                     registration.start()
                     registration.join()
@@ -425,7 +425,7 @@ class SpecificManagerRegistry(ManoBasePlugin):
                                 else:
 
                                     # Check if update is successfully done.
-                                    update = threading.Thread(target=self._wait_for_update, args=[sm_repo_name])
+                                    update = threading.Thread(target=self._wait_for_update, args=[sm_repo_name, m_id])
                                     update.daemon = True
                                     update.start()
                                     update.join()
@@ -561,18 +561,20 @@ class SpecificManagerRegistry(ManoBasePlugin):
         repo_doc = model.SSMRepository.objects(sm_repo_id=rep_name).first()
         while (repo_doc is None) and c < timeout:
             time.sleep(sleep_interval)
+            repo_doc = model.SSMRepository.objects(sm_repo_id=rep_name).first()
             c += sleep_interval
 
         if c >= 60:
             LOG.error('Instantiation failed for: {0}, Registration failed- timeout error'.format(name))
 
-    def _wait_for_update(self, name):
+    def _wait_for_update(self, rep_name, name):
         c = 0
         timeout = 60
         sleep_interval = 2
-        repo_doc = model.SSMRepository.objects(sm_repo_id=name).first()
+        repo_doc = model.SSMRepository.objects(sm_repo_id=rep_name).first()
         while repo_doc['status'] != 'registered' and c < timeout:
             time.sleep(sleep_interval)
+            repo_doc = model.SSMRepository.objects(sm_repo_id=rep_name).first()
             c += sleep_interval
 
         if c >= 60:

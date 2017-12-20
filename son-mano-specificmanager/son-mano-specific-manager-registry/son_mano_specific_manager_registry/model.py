@@ -35,7 +35,7 @@ from mongoengine import Document, connect, StringField, UUIDField
 
 logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger("son-mano-specific-manager-registry")
-LOG.setLevel(logging.DEBUG)
+LOG.setLevel(logging.INFO)
 
 
 class SSMRepository(Document):
