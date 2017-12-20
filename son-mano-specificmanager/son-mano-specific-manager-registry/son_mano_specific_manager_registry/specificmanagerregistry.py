@@ -41,6 +41,7 @@ from sonmanobase.plugin import ManoBasePlugin
 from sonmanobase import messaging
 from son_mano_specific_manager_registry import smr_engine as engine
 from son_mano_specific_manager_registry import smr_topics as topic
+from son_mano_specific_manager_registry import model
 
 logging.basicConfig(level=logging.INFO)
 LOG = logging.getLogger("son-mano-specific-manager-registry")
@@ -56,7 +57,9 @@ class SpecificManagerRegistry(ManoBasePlugin):
         self.description = 'Specific Manager Registry'
 
         # a storage for f/ssms
-        self.ssm_repo = {}
+        # TK
+        #self.ssm_repo = {}
+        model.initialize()
 
         # connect to the docker daemon
         self.smrengine = engine.SMREngine()
@@ -197,38 +200,38 @@ class SpecificManagerRegistry(ManoBasePlugin):
                     sm_repo_id = "{0}{1}".format(message['specific_manager_id'], message['sf_uuid'])
 
                     # check if the SM is already registered
-                    if sm_repo_id in self.ssm_repo.keys():
+                    repo_doc = model.SSMRepository.objects(sm_repo_id=sm_repo_id).first()
+                    if repo_doc is not None:
                         # check if the sm is an updating version
                         if message['update_version'] == 'true':
-                            self.ssm_repo[sm_repo_id]['status']= 'registered'
-                            self.ssm_repo[sm_repo_id]['version'] = message['version']
-                            self.ssm_repo[sm_repo_id]['description'] = message['description']
-                            result = self.ssm_repo[sm_repo_id]
+                            repo_doc['status'] = 'registered'
+                            repo_doc['version'] = message['version']
+                            repo_doc['description'] = message['description']
+                            repo_doc.save()
+                            result = repo_doc.to_dict()
                         else:
                             LOG.error("Cannot register '{0}', already exists".format(message['specific_manager_id']))
                             result = {'status': 'Failed', 'error': "Cannot register '{0}', "
                                                                    "already exists".format(message['specific_manager_id'])}
                     else:
-                        pid = str(uuid.uuid4())
-                        response = {
-                            "status": "registered",
-                            "specific_manager_type": message['specific_manager_type'],
-                            "service_name": message['service_name'],
-                            "function_name": message['function_name'],
-                            "specific_manager_id": message['specific_manager_id'],
-                            "version": message['version'],
-                            "description": message['description'],
-                            "uuid": pid,
-                            "sfuuid": message['sf_uuid'],
-                            "error": None
-                        }
-                        self.ssm_repo.update({sm_repo_id: response})
-                        result = response
+                        newdoc = model.SSMRepository(sm_repo_id = sm_repo_id,
+                            status = "registered",
+                            specific_manager_type = message['specific_manager_type'],
+                            service_name = message['service_name'],
+                            function_name = message['function_name'],
+                            specific_manager_id = message['specific_manager_id'],
+                            version = message['version'],
+                            description = message['description'],
+                            uuid = uuid.uuid4(),
+                            sfuuid = message['sf_uuid'],
+                            error = None
+                        )
+                        newdoc.save()
+                        result = newdoc.to_dict()
                 else:
                     result = {'status': 'Failed', 'error': 'Invalid registration request format'}
                     LOG.error("registration failed, invalid registration request format")
             except BaseException as err:
-
                 if 'specific_manager_id' in message:
                     result = {'status': 'Failed', 'error': str(err)}
                     LOG.error("{0} registration failed, Error: {1}".format(message['specific_manager_id'], str(err)))
@@ -322,11 +325,13 @@ class SpecificManagerRegistry(ManoBasePlugin):
                     registration.daemon = True
                     registration.start()
                     registration.join()
-                    if sm_repo_name in self.ssm_repo.keys():
+                    repo_doc = model.SSMRepository.objects(sm_repo_id=sm_repo_name).first()
+                    if repo_doc is not None:
                         LOG.debug('Registration & instantiation succeeded for: {0}'.format(m_id))
-                        self.ssm_repo[sm_repo_name]['status'] = 'running'
+                        repo_doc['status'] = 'running'
+                        repo_doc.save()
                         result_dict.update({m_id: {'status': 'Instantiated',
-                                            'uuid': self.ssm_repo[sm_repo_name]['uuid'], 'error': 'None'}})
+                                            'uuid': repo_doc['uuid'], 'error': 'None'}})
                     else:
                         LOG.error('Instantiation failed for: {0}, Error: Registration failed'.format(m_id))
                         result_dict.update({m_id: {'status': 'Failed', 'uuid': 'None', 'error': 'Registration failed'}})
@@ -402,8 +407,8 @@ class SpecificManagerRegistry(ManoBasePlugin):
                             result_dict.update({m_id: {'status': 'Failed', 'error': result['error']}})
                         else:
                             LOG.info('On-boarding succeeded for: {0}'.format(m_id))
-
-                            if c_id == m_id and self.ssm_repo[sm_repo_name]['sfuuid'] == message['UUID']:
+                            repo_doc = model.SSMRepository.objects(sm_repo_id=sm_repo_name).first()
+                            if c_id == m_id and repo_doc['sfuuid'] == message['UUID']:
 
                                 # instantiate the new SM
                                 LOG.info('Instantiation started for: {0}'.format(m_id))
@@ -427,11 +432,13 @@ class SpecificManagerRegistry(ManoBasePlugin):
                                     update.start()
                                     update.join()
 
-                                    if self.ssm_repo[sm_repo_name]['status'] == 'registered':
+                                    repo_doc = model.SSMRepository.objects(sm_repo_id=sm_repo_name).first()
+                                    if repo_doc['status'] == 'registered':
                                         LOG.debug('Registration & instantiation succeeded for: {0}'.format(m_id))
-                                        self.ssm_repo[sm_repo_name]['status'] = 'running'
+                                        repo_doc['status'] = 'running'
+                                        repo_doc.save()
                                         result_dict.update({m_id: {'status': 'Updated',
-                                                                   'uuid': self.ssm_repo[sm_repo_name]['uuid'],
+                                                                   'uuid': repo_doc['uuid'],
                                                                    'error': 'None'}})
 
                                         # terminate the current SM
@@ -451,7 +458,8 @@ class SpecificManagerRegistry(ManoBasePlugin):
                                                 self.smrengine.rm(id=random_id, image=m_image, uuid= message['UUID'])
                                                 result_dict.update({m_id: {'status': 'Failed', 'error': str(error)}})
                                             else:
-                                                self.ssm_repo[sm_repo_name]['status'] = 'updated'
+                                                repo_doc['status'] = 'updated'
+                                                repo_doc.save()
                                                 LOG.debug("Termination succeeded for: {0} (old version)".format(c_id))
                                                 LOG.debug('{0} updating succeeded'.format(m_id))
                                     else:
@@ -483,11 +491,13 @@ class SpecificManagerRegistry(ManoBasePlugin):
                                     registration.start()
                                     registration.join()
 
-                                    if sm_repo_name in self.ssm_repo.keys():
+                                    repo_doc = model.SSMRepository.objects(sm_repo_id=sm_repo_name).first()
+                                    if repo_doc is not None:
                                         LOG.debug('Registration & instantiation succeeded for: {0}'.format(m_id))
-                                        self.ssm_repo[sm_repo_name]['status'] = 'running'
+                                        repo_doc['status'] = 'running'
+                                        repo_doc.save()
                                         result_dict.update({m_id: {'status': 'Updated',
-                                                            'uuid': self.ssm_repo[sm_repo_name]['uuid'], 'error': 'None'}})
+                                                            'uuid': repo_doc['uuid'], 'error': 'None'}})
 
                                         # terminate the current SM
                                         try:
@@ -495,11 +505,12 @@ class SpecificManagerRegistry(ManoBasePlugin):
                                         except BaseException as error:
                                             LOG.error("Termination failed for: {0} , Error: {1}".format(c_id, error))
                                             self.smrengine.rm(id=m_id, image=m_image, uuid=message['UUID'])
-                                            del self.ssm_repo[sm_repo_name]
+                                            repo_doc.delete()
                                             result_dict.update({m_id: {'status': 'Failed', 'error': str(error)}})
                                         else:
                                             LOG.debug("Termination succeeded for: {0} (old version)".format(c_id))
-                                            self.ssm_repo[sm_repo_name]['status'] = 'terminated'
+                                            repo_doc['status'] = 'terminated'
+                                            repo_doc.save()
                                             LOG.debug('Updating succeeded, {0} has replaced by {1}'.format(c_id, m_id))
                                     else:
                                         LOG.error("Instantiation failed for: {0}, Error: Registration failed".format(m_id))
@@ -537,7 +548,10 @@ class SpecificManagerRegistry(ManoBasePlugin):
                         result_dict.update({m_id: {'status': 'Failed', 'error': str(error)}})
                     else:
                         LOG.debug("Termination succeeded for: {0}".format(m_id))
-                        self.ssm_repo["{0}{1}".format(m_id, message['UUID'])]['status']= 'terminated'
+                        sm_repo_name = "{0}{1}".format(m_id, message['UUID'])
+                        repo_doc = model.SSMRepository.objects(sm_repo_id=sm_repo_name).first()
+                        repo_doc['status']= 'terminated'
+                        repo_doc.save()
                         result_dict.update({m_id: {'status': 'Terminated', 'error': 'None'}})
 
         return result_dict
@@ -546,7 +560,8 @@ class SpecificManagerRegistry(ManoBasePlugin):
         c = 0
         timeout = 5
         sleep_interval = 2
-        while name not in self.ssm_repo.keys() and c < timeout:
+        repo_doc = model.SSMRepository.objects(sm_repo_id=name).first()
+        while (repo_doc is None) and c < timeout:
             time.sleep(sleep_interval)
             c += sleep_interval
 
@@ -554,7 +569,8 @@ class SpecificManagerRegistry(ManoBasePlugin):
         c = 0
         timeout = 5
         sleep_interval = 2
-        while self.ssm_repo[name]['status'] != 'registered' and c < timeout:
+        repo_doc = model.SSMRepository.objects(sm_repo_id=name).first()
+        while repo_doc['status'] != 'registered' and c < timeout:
             time.sleep(sleep_interval)
             c += sleep_interval
 

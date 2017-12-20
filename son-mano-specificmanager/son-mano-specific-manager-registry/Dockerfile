@@ -24,6 +24,8 @@ ENV DOCKER_HOST unix://var/run/docker.sock
 
 #ENV network_name broker,broker
 
+ENV mongo_host mongo
+ENV mongo_port 27017
 
 
 ADD son-mano-base /son-mano-base
